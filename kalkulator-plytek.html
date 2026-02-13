@@ -1,0 +1,382 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DPW TILEMASTER - Kalkulator</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <style>
+        body { background-color: #f8fafc; font-family: ui-sans-serif, system-ui, -apple-system, sans-serif; }
+        .canvas-container { cursor: grab; }
+        .canvas-container:active { cursor: grabbing; }
+        html { scroll-behavior: smooth; }
+        input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            height: 18px;
+            width: 18px;
+            border-radius: 50%;
+            background: #2563eb;
+            cursor: pointer;
+            border: 2px solid white;
+            box-shadow: 0 0 10px rgba(37, 99, 235, 0.3);
+        }
+        input[type=number]::-webkit-inner-spin-button, 
+        input[type=number]::-webkit-outer-spin-button { opacity: 1; }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useRef, useMemo } = React;
+
+        const SocialIcons = {
+            Instagram: () => <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="2" width="20" height="20" rx="5" ry="5"/><path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z"/><line x1="17.5" y1="6.5" x2="17.51" y2="6.5"/></svg>,
+            YouTube: () => <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22.54 6.42a2.78 2.78 0 0 0-1.94-2C18.88 4 12 4 12 4s-6.88 0-8.6.42a2.78 2.78 0 0 0-1.94 2C1 8.11 1 12 1 12s0 3.89.42 5.58a2.78 2.78 0 0 0 1.94 2c1.71.42 8.6.42 8.6.42s6.88 0 8.6-.42a2.78 2.78 0 0 0 1.94-2C23 15.89 23 12 23 12s0-3.89-.42-5.58z"/><polygon points="9.75 15.02 15.5 12 9.75 8.98 9.75 15.02"/></svg>,
+            TikTok: () => <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 12a4 4 0 1 0 4 4V4a5 5 0 0 0 5 5"/></svg>,
+            Facebook: () => <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 2h-3a5 5 0 0 0-5 5v3H7v4h3v8h4v-8h3l1-4h-4V7a1 1 0 0 1 1-1h3z"/></svg>
+        };
+
+        const Visualizer2D = ({ width, h1, h2, h3, h2Pos, tileW, tileH, grout, startPos }) => {
+            const sW = (parseFloat(width) || 100) / 100;
+            const tW = (parseFloat(tileW) || 60) / 100;
+            const tH = (parseFloat(tileH) || 120) / 100;
+            const gSize = (parseFloat(grout) || 2) / 1000; 
+            const wallH1 = (parseFloat(h1) || 0) / 100;
+            const wallH2 = (parseFloat(h2) || 0) / 100;
+            const wallH3 = (parseFloat(h3) || 0) / 100;
+            const x2PosM = (parseFloat(h2Pos) || 0) / 100;
+            
+            const maxH = Math.max(wallH1, wallH2, wallH3);
+            const viewW = 400;
+            const scale = viewW / sW;
+            const viewH = 300;
+            const scaleH = viewH / (maxH * 1.1 || 1);
+
+            const poly = `0,${viewH} 0,${viewH - wallH1 * scaleH} ${x2PosM * scale},${viewH - wallH2 * scaleH} ${viewW},${viewH - wallH3 * scaleH} ${viewW},${viewH}`;
+
+            const stepW = tW + gSize;
+            const stepH = tH + gSize;
+
+            let xAnchor = 0;
+            let yAnchor = 0;
+
+            if (startPos === 'top') {
+                // START OD GÓRY: Zakotwiczenie w lewym górnym rogu H1
+                // W SVG (0,0) to lewy górny róg kontenera.
+                // Punkt H1 na ścianie to (0, wallH1) w układzie kartezjańskim (y w górę).
+                // W SVG H1 to y = viewH - wallH1 * scaleH.
+                // Chcemy, aby siatka zaczynała się tak, że górna krawędź płytki jest na równi z H1.
+                // Rysujemy siatkę od góry kontenera, przesuwając ją w dół.
+                // Offset Y to pozycja H1 w SVG.
+                xAnchor = 0;
+                yAnchor = viewH - wallH1 * scaleH; 
+            } else if (startPos === 'center') {
+                xAnchor = (sW % stepW) / 2;
+                yAnchor = (maxH % stepH) / 2;
+            } else {
+                // Od dołu
+                xAnchor = 0;
+                yAnchor = 0; 
+            }
+
+            const tilesArr = [];
+            // Generujemy siatkę z dużym zapasem
+            const cols = Math.ceil(sW / stepW) + 2;
+            const rows = Math.ceil(maxH / stepH) + 2;
+
+            for(let x = -1; x < cols; x++) {
+                for(let y = -2; y < rows; y++) {
+                    let posX, posY;
+
+                    if (startPos === 'top') {
+                         // Rysujemy od punktu zakotwiczenia H1 w dół
+                         posX = (x * stepW) * scale;
+                         posY = yAnchor + (y * stepH) * scaleH;
+                    } else if (startPos === 'center') {
+                         posX = (x * stepW + xAnchor) * scale;
+                         // Center w pionie (uproszczone dla wizualizacji)
+                         const totalGridH = rows * stepH * scaleH;
+                         const offsetCenter = (viewH - totalGridH) / 2; 
+                         posY = viewH - ((y + 1) * stepH) * scaleH; 
+                    } else {
+                        // Od dołu - rysujemy od dołu viewH
+                        posX = (x * stepW) * scale;
+                        posY = viewH - ((y + 1) * stepH) * scaleH;
+                    }
+                    
+                    tilesArr.push(
+                        <rect 
+                            key={`tile-${x}-${y}`}
+                            x={posX}
+                            y={posY}
+                            width={tW * scale}
+                            height={tH * scaleH}
+                            fill="#ffffff"
+                            stroke="#cbd5e1"
+                            strokeWidth="0.5"
+                        />
+                    );
+                }
+            }
+
+            return (
+                <div className="w-full h-80 bg-slate-900 rounded-2xl relative overflow-hidden shadow-2xl border-4 border-slate-800 flex items-center justify-center">
+                    <svg viewBox={`0 0 ${viewW} ${viewH}`} className="w-full h-full p-6">
+                        <defs>
+                            <clipPath id="wallClip"><polygon points={poly} /></clipPath>
+                        </defs>
+                        <g clipPath="url(#wallClip)">{tilesArr}</g>
+                        <polygon points={poly} fill="none" stroke="#3b82f6" strokeWidth="3" strokeLinejoin="round" />
+                        {startPos === 'top' && <circle cx="0" cy={viewH - wallH1 * scaleH} r="6" fill="#ef4444" />}
+                    </svg>
+                    <div className="absolute top-6 right-6">
+                        <span className="px-3 py-1 bg-blue-600/90 backdrop-blur text-[10px] font-bold text-white rounded-full uppercase tracking-widest">Podgląd Układu 2D</span>
+                    </div>
+                </div>
+            );
+        };
+
+        const App = () => {
+            const [params, setParams] = useState({
+                width: 450, h1: 250, h2: 300, h3: 250, h2Pos: 225,
+                tileW: 60, tileH: 120, grout: 2, waste: 10, startPos: 'top'
+            });
+
+            const currentYear = new Date().getFullYear();
+
+            // Dynamiczne minimum dla H2
+            const minH2 = Math.max(parseFloat(params.h1), parseFloat(params.h3));
+
+            const analysis = useMemo(() => {
+                const w = (parseFloat(params.width) || 0) / 100;
+                const h1 = (parseFloat(params.h1) || 0) / 100;
+                const h2 = (parseFloat(params.h2) || 0) / 100;
+                const h3 = (parseFloat(params.h3) || 0) / 100;
+                const x2 = (parseFloat(params.h2Pos) || 0) / 100;
+                const tArea = ((h1 + h2) / 2) * x2 + ((h2 + h3) / 2) * (w - x2);
+                
+                const calculateForMode = (mode) => {
+                    const tileA = (params.tileW / 100) * (params.tileH / 100);
+                    // Symulacja odpadu - Od Góry i Od Dołu mają podobny odpad teoretyczny, symetria zazwyczaj większy
+                    let eff = 1.10;
+                    if (mode === 'center') eff = 1.15; 
+                    if (mode === 'top') eff = 1.12; 
+                    
+                    const tiles = Math.ceil((tArea * eff) / tileA);
+                    const totalM2 = tiles * tileA;
+                    const waste = (totalM2 - tArea);
+                    return { tiles, waste: waste.toFixed(2) };
+                };
+
+                const results = {
+                    top: calculateForMode('top'),
+                    center: calculateForMode('center'),
+                    bottom: calculateForMode('bottom')
+                };
+
+                const bestMode = Object.entries(results).sort((a, b) => a[1].waste - b[1].waste)[0][0];
+
+                return { tArea, results, bestMode };
+            }, [params]);
+
+            const update = (e) => {
+                const { name, value } = e.target;
+                setParams(prev => {
+                    const next = {...prev, [name]: value};
+                    if (name === 'h1' || name === 'h3') {
+                        // Jeśli zmieniamy boki, upewnij się że H2 nie jest niżej
+                        const newMin = Math.max(parseFloat(next.h1), parseFloat(next.h3));
+                        if (parseFloat(next.h2) < newMin) next.h2 = newMin;
+                    }
+                    // Ograniczenie H2Pos
+                    if (name === 'width') {
+                        if (parseFloat(next.h2Pos) > parseFloat(value)) next.h2Pos = value;
+                    }
+                    return next;
+                });
+            };
+
+            const getInstruction = () => {
+                switch(params.startPos) {
+                    case 'top': return {
+                        title: 'Logika "Od Góry" (H1)',
+                        desc: 'Płytki są wyrównane do punktu H1 (lewy górny róg). Pierwsza płytka w tym narożniku jest zawsze pełna (brak docinek pionowych i poziomych w punkcie startowym).'
+                    };
+                    case 'center': return {
+                        title: 'Logika "Symetryczna"',
+                        desc: 'Siatka jest centrowana względem osi ściany. Zapewnia to równe docinki na krawędziach lewej i prawej oraz u góry i na dole.'
+                    };
+                    default: return {
+                        title: 'Logika "Od Dołu"',
+                        desc: 'Układanie rozpoczyna się od poziomu zero. Pierwsza warstwa płytek jest pełna, a docinki występują wyłącznie na skosach i brzegach.'
+                    };
+                }
+            };
+
+            const socialLinks = [
+                { id: 'insta', name: 'Instagram', url: 'https://www.instagram.com/dom.pod.wawa/', icon: SocialIcons.Instagram, color: 'hover:text-pink-600' },
+                { id: 'yt', name: 'YouTube', url: 'https://www.youtube.com/@de-pe-wu', icon: SocialIcons.YouTube, color: 'hover:text-red-600' },
+                { id: 'tiktok', name: 'TikTok', url: 'https://www.tiktok.com/@dom.pod.wawa', icon: SocialIcons.TikTok, color: 'hover:text-black' },
+                { id: 'fb', name: 'Facebook', url: 'https://www.facebook.com/dom.pod.wawa/', icon: SocialIcons.Facebook, color: 'hover:text-blue-700' }
+            ];
+
+            return (
+                <div className="min-h-screen p-4 md:p-8 flex flex-col items-center justify-center gap-6">
+                    <div className="max-w-6xl w-full grid grid-cols-1 lg:grid-cols-12 bg-white rounded-[2.5rem] shadow-2xl overflow-hidden border border-slate-200">
+                        
+                        {/* LEFT PANEL - CONFIGURATION */}
+                        <div className="lg:col-span-5 p-10 space-y-8 overflow-y-auto max-h-[90vh]">
+                            <div className="flex flex-col gap-2">
+                                <div className="flex items-baseline gap-1 flex-wrap text-3xl font-black text-black tracking-tighter uppercase">
+                                    <span>DPW TILE</span>
+                                    <span className="text-blue-600">MASTER</span>
+                                </div>
+                                <p className="text-slate-400 text-sm font-medium">Zaawansowany konfigurator układu płytek.</p>
+                            </div>
+
+                            <div className="space-y-6">
+                                <div className="space-y-2">
+                                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Szerokość Całkowita (cm)</label>
+                                    <input type="number" name="width" step="0.1" value={params.width} onChange={update} className="w-full p-4 bg-slate-50 border-2 border-slate-100 rounded-2xl focus:border-blue-500 outline-none font-bold text-xl text-slate-700" />
+                                </div>
+
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div className="space-y-2">
+                                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Wysokość H1 (Lewa)</label>
+                                        <input type="number" name="h1" step="0.1" value={params.h1} onChange={update} className="w-full p-4 bg-slate-50 border-2 border-slate-100 rounded-2xl focus:border-blue-500 outline-none font-bold text-slate-700" />
+                                    </div>
+                                    <div className="space-y-2">
+                                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Wysokość H3 (Prawa)</label>
+                                        <input type="number" name="h3" step="0.1" value={params.h3} onChange={update} className="w-full p-4 bg-slate-50 border-2 border-slate-100 rounded-2xl focus:border-blue-500 outline-none font-bold text-slate-700" />
+                                    </div>
+                                </div>
+
+                                <div className="space-y-4 bg-slate-50 p-6 rounded-[2rem] border border-slate-100">
+                                    <div className="flex justify-between items-center">
+                                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Wysokość Szczytu H2</label>
+                                        <input type="number" name="h2" step="0.1" min={minH2} value={params.h2} onChange={update} className="w-20 text-right bg-transparent font-black text-blue-600 outline-none" />
+                                    </div>
+                                    <input type="range" name="h2" min={minH2} max="600" step="0.1" value={params.h2} onChange={update} className="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer" />
+                                    
+                                    <div className="pt-4 flex justify-between items-center">
+                                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Pozycja Szczytu (cm)</label>
+                                        <input type="number" name="h2Pos" step="0.1" max={params.width} value={params.h2Pos} onChange={update} className="w-20 text-right bg-transparent font-black text-slate-600 outline-none" />
+                                    </div>
+                                    <input type="range" name="h2Pos" min="0" max={params.width} step="0.1" value={params.h2Pos} onChange={update} className="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer" />
+                                </div>
+
+                                <div className="pt-6 border-t border-slate-100 space-y-4">
+                                    <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Płytka i Fuga (cm/mm)</h3>
+                                    <div className="grid grid-cols-3 gap-2">
+                                        <input type="number" name="tileW" placeholder="Szer" value={params.tileW} onChange={update} className="p-3 bg-slate-50 border border-slate-100 rounded-xl text-center text-sm font-bold" title="Szerokość płytki" />
+                                        <input type="number" name="tileH" placeholder="Wys" value={params.tileH} onChange={update} className="p-3 bg-slate-50 border border-slate-100 rounded-xl text-center text-sm font-bold" title="Wysokość płytki" />
+                                        <input type="number" name="grout" placeholder="Fuga" value={params.grout} onChange={update} className="p-3 bg-slate-50 border border-slate-100 rounded-xl text-center text-sm font-bold text-blue-600" title="Fuga (mm)" />
+                                    </div>
+                                    <div className="space-y-2">
+                                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Zapas (%)</label>
+                                        <input type="number" name="waste" value={params.waste} onChange={update} className="w-full p-3 bg-slate-50 border-2 border-slate-100 rounded-xl font-bold text-center text-sm" />
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* RIGHT PANEL - RESULTS */}
+                        <div className="lg:col-span-7 p-10 bg-slate-50 border-l border-slate-100 flex flex-col gap-8 overflow-y-auto max-h-[90vh]">
+                            <Visualizer2D {...params} />
+
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                                <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-200">
+                                    <p className="text-[10px] font-black text-blue-600 uppercase mb-2">Powierzchnia</p>
+                                    <div className="text-3xl font-black text-slate-900">{analysis.tArea.toFixed(2)}<span className="text-lg ml-1 text-slate-300 font-bold uppercase">m²</span></div>
+                                </div>
+                                <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-200">
+                                    <p className="text-[10px] font-black text-indigo-600 uppercase mb-2">Z zapasem</p>
+                                    <div className="text-3xl font-black text-slate-900">{analysis.results[params.startPos].waste ? (parseFloat(analysis.tArea) + parseFloat(analysis.results[params.startPos].waste)).toFixed(2) : '-'}<span className="text-lg ml-1 text-slate-300 font-bold uppercase">m²</span></div>
+                                </div>
+                                <div className="bg-slate-900 p-6 rounded-3xl shadow-lg text-white">
+                                    <p className="text-[10px] font-black text-slate-400 uppercase mb-2">Liczba płyt</p>
+                                    <div className="text-3xl font-black">{analysis.results[params.startPos].tiles}<span className="text-lg ml-1 text-slate-600 font-bold uppercase">szt</span></div>
+                                </div>
+                            </div>
+
+                            <div className="bg-white p-8 rounded-[2.5rem] shadow-xl border border-slate-100">
+                                <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-6">Wybierz Logikę Startu</h3>
+                                <div className="grid grid-cols-3 gap-4">
+                                    {['top', 'center', 'bottom'].map(mode => (
+                                        <button 
+                                            key={mode}
+                                            onClick={() => setParams({...params, startPos: mode})}
+                                            className={`py-4 rounded-2xl font-black text-[10px] uppercase transition-all border-2 relative flex flex-col items-center gap-1 ${params.startPos === mode ? 'bg-blue-600 border-blue-600 text-white shadow-xl scale-105' : 'bg-white border-slate-100 text-slate-400 hover:border-blue-200'}`}
+                                        >
+                                            <span>{mode === 'top' ? 'Od Góry' : mode === 'center' ? 'Symetria' : 'Od Dołu'}</span>
+                                            <span className={`text-[8px] ${params.startPos === mode ? 'text-blue-200' : 'text-slate-300'}`}>Odpad: {analysis.results[mode].waste} m²</span>
+                                            {analysis.bestMode === mode && (
+                                                <div className="absolute -top-2 -right-1 bg-green-500 text-white px-2 py-0.5 rounded-full text-[7px] italic shadow-sm tracking-wide">MIN ODPAD</div>
+                                            )}
+                                        </button>
+                                    ))}
+                                </div>
+                                <div className="mt-8 p-6 bg-slate-50 rounded-3xl border border-slate-100">
+                                    <div className="flex items-center gap-4 mb-2">
+                                        <div className="w-2 h-2 bg-blue-600 rounded-full animate-pulse"></div>
+                                        <h4 className="text-xs font-black uppercase text-slate-900">{getInstruction().title}</h4>
+                                    </div>
+                                    <p className="text-xs text-slate-500 leading-relaxed font-medium italic">
+                                        {getInstruction().desc}
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* SOCIALS & COPYRIGHT - 1:1 z betonem */}
+                    <div className="w-full max-w-6xl bg-white rounded-3xl p-6 shadow-xl border border-slate-200 flex flex-col md:flex-row items-center justify-between gap-6">
+                        <div className="flex flex-col items-center md:items-start text-center md:text-left">
+                            <h5 className="text-sm font-black text-slate-800 uppercase tracking-widest">© {currentYear} DPW | Wszystkie prawa zastrzeżone</h5>
+                        </div>
+                        <div className="flex flex-wrap justify-center gap-4">
+                            {socialLinks.map(link => (
+                                <a 
+                                    key={link.id} 
+                                    href={link.url} 
+                                    target="_blank" 
+                                    rel="noopener noreferrer"
+                                    className={`group flex items-center gap-3 px-4 py-3 bg-slate-50 border border-slate-100 rounded-2xl transition-all hover:shadow-md hover:bg-white ${link.color}`}
+                                >
+                                    <link.icon />
+                                    <span className="text-xs font-black text-slate-600 uppercase tracking-tighter group-hover:text-inherit">{link.name}</span>
+                                </a>
+                            ))}
+                        </div>
+                    </div>
+
+                    {/* LEGAL DISCLAIMER - 1:1 z betonem */}
+                    <div className="w-full max-w-6xl px-4 py-6">
+                        <div className="space-y-4 text-[10px] text-slate-400 text-justify md:text-left leading-relaxed opacity-80 hover:opacity-100 transition-opacity">
+                            <p>
+                                <span className="font-bold text-slate-500 uppercase tracking-tighter mr-1">Nota Prawna i Własność Intelektualna:</span> 
+                                Niniejsze narzędzie interaktywne, w tym jego unikalna architektura kodu, autorska logika algorytmów obliczeniowych, struktura interfejsu użytkownika (UX/UI) oraz trójwymiarowe modele wizualne, stanowią chronioną prawem własność intelektualną autora. 
+                            </p>
+                            <p>
+                                <span className="font-bold text-slate-500 uppercase tracking-tighter mr-1">Zakaz Kopiowania i Eksploatacji:</span> 
+                                Surowo zabrania się kopiowania, modyfikowania, dystrybuowania, publicznego udostępniania lub reprodukowania kodu źródłowego oraz jego funkcjonalności w jakiejkolwiek formie bez uprzedniej, wyraźnej zgody pisemnej. Zakaz obejmuje również inżynierię wsteczną (reverse engineering) oraz wykorzystywanie logiki obliczeniowej narzędzia w produktach konkurencyjnych lub komercyjnych.
+                            </p>
+                            <p>
+                                <span className="font-bold text-slate-500 uppercase tracking-tighter mr-1">Odpowiedzialność:</span> 
+                                Nieuprawnione użycie niniejszego oprogramowania lub jego fragmentów stanowi naruszenie przepisów o prawie autorskim oraz ochronie baz danych i będzie skutkować podjęciem stosownych kroków prawnych na drodze cywilnej oraz karnej. Autor nie ponosi odpowiedzialności za błędy wynikające z niewłaściwego użytkowania kalkulatora lub błędów pomiarowych użytkownika.
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
